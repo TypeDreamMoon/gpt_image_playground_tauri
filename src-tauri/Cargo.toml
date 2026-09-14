@@ -1,0 +1,38 @@
+[package]
+name = "gpt-image-playground"
+version = "0.7.12"
+description = "GPT Image Playground 桌面版"
+authors = ["CookSleep"]
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+
+[lib]
+# Tauri 移动端需要 cdylib/staticlib，桌面端用 rlib
+name = "gpt_image_playground_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 由 Rust 侧发起 HTTP 请求，绕开 WebView 的 CORS 限制
+tauri-plugin-http = "2"
+# 原生保存/选择目录对话框
+tauri-plugin-dialog = "2"
+# 配合对话框把文件写入用户选定的位置
+tauri-plugin-fs = "2"
+# 用系统默认浏览器打开外部链接
+tauri-plugin-opener = "2"
+# 记住窗口尺寸与位置
+tauri-plugin-window-state = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

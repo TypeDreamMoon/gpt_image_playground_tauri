@@ -1,0 +1,30 @@
+{
+  "name": "gpt-image-playground-tauri",
+  "private": true,
+  "version": "0.7.12",
+  "type": "module",
+  "description": "GPT Image Playground 的 Tauri v2 桌面壳",
+  "scripts": {
+    "setup": "node scripts/apply-patch.mjs",
+    "patch:update": "node scripts/update-patch.mjs",
+    "web:install": "node scripts/tauri-hook.mjs install",
+    "web:dev": "node scripts/tauri-hook.mjs dev",
+    "web:build": "node scripts/tauri-hook.mjs build",
+    "dev": "node scripts/tauri.mjs dev",
+    "build": "node scripts/tauri.mjs build",
+    "build:debug": "node scripts/tauri.mjs build --debug",
+    "tauri": "node scripts/tauri.mjs",
+    "icon": "node scripts/tauri.mjs icon src-tauri/icons/source.svg"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
+    "@tauri-apps/plugin-fs": "^2.5.2",
+    "@tauri-apps/plugin-http": "^2.6.0",
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "@tauri-apps/plugin-window-state": "^2.4.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

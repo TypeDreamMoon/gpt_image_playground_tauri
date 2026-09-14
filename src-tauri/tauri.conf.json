@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GPT Image Playground",
+  "version": "0.7.12",
+  "identifier": "com.cooksleep.gpt-image-playground",
+  "build": {
+    "beforeDevCommand": "node scripts/tauri-hook.mjs dev",
+    "beforeBuildCommand": "node scripts/tauri-hook.mjs build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../_source/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "GPT Image Playground",
+        "width": 1440,
+        "height": 940,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Graphics and Design",
+    "shortDescription": "GPT Image Playground 桌面版",
+    "longDescription": "基于 OpenAI gpt-image 系列 API 的图片生成与编辑工具，使用 Tauri 打包为桌面应用。",
+    "copyright": "MIT Licensed",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese", "English"],
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

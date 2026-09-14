@@ -1,0 +1,387 @@
+diff --git a/src/lib/desktop.ts b/src/lib/desktop.ts
+new file mode 100644
+index 0000000..1018bda
+--- /dev/null
++++ b/src/lib/desktop.ts
+@@ -0,0 +1,251 @@
++// 桌面端（Tauri）适配层。
++//
++// 上游是纯前端应用，在 WebView 里只有三处与浏览器不同，这里逐一补齐：
++// 1. 服务商 CORS 限制 —— 请求改由 Rust 侧发出；
++// 2. <a download> 行为不可靠 —— 改用原生保存对话框写入磁盘；
++// 3. 外部链接会把应用自身导航走 —— 改用系统默认浏览器打开。
++//
++// 未运行在 Tauri 中时（普通 Web 部署）所有导出函数都退化为浏览器原生行为，
++// 因此该模块对上游的 Web 版本没有副作用。
++
++const TAURI_GLOBAL = '__TAURI_INTERNALS__'
++
++export function isDesktopApp(): boolean {
++  return typeof window !== 'undefined' && TAURI_GLOBAL in window
++}
++
++export interface DesktopFileItem {
++  blob: Blob
++  fileName: string
++}
++
++export interface DesktopSaveResult {
++  successCount: number
++  failCount: number
++}
++
++type BridgedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
++
++let bridgedFetchPromise: Promise<BridgedFetch> | null = null
++let bridgeUnavailable = false
++let installed = false
++
++/** 动态引入插件，避免 Web 部署把桌面端依赖打进主包 */
++function loadBridgedFetch(): Promise<BridgedFetch> {
++  bridgedFetchPromise ??= import('@tauri-apps/plugin-http').then((mod) => mod.fetch as BridgedFetch)
++  return bridgedFetchPromise
++}
++
++function resolveRequestUrl(input: RequestInfo | URL): string {
++  if (typeof input === 'string') return input
++  if (input instanceof URL) return input.href
++  return input.url
++}
++
++function isAppOwnUrl(url: string): boolean {
++  const origin = window.location.origin
++  return url === origin || url.startsWith(`${origin}/`)
++}
++
++// Tauri 自身的 IPC 与资源协议同样走 http(s)：Windows 下 IPC 地址形如
++// http://ipc.localhost/<command>，而 IPC 内部恰恰是用 fetch 发请求的。
++// 如果把这些地址也桥接到 http 插件，插件自身的 invoke 会再次触发 IPC fetch，
++// 形成递归并让整个 IPC 失效（表现为「IPC custom protocol failed」）。
++const TAURI_INTERNAL_HOSTS = new Set(['ipc.localhost', 'asset.localhost', 'tauri.localhost'])
++
++/** 只接管指向外部服务商的绝对 http(s) 请求 */
++function shouldBridge(url: string): boolean {
++  if (!/^https?:\/\//i.test(url)) return false
++  try {
++    if (TAURI_INTERNAL_HOSTS.has(new URL(url).hostname)) return false
++  } catch {
++    return false
++  }
++  return !isAppOwnUrl(url)
++}
++
++/**
++ * 用 Rust 侧请求替换 window.fetch。
++ * 上游所有 API 调用、图片链接下载、流式响应都走这里，因此无需改动业务代码。
++ */
++function installFetchBridge() {
++  const originalFetch = window.fetch.bind(window)
++
++  window.fetch = async (input, init) => {
++    // 桥接是无条件安装的（见 installDesktopIntegration），因此每次请求都要判断
++    // 当前是否真的运行在 Tauri 中；浏览器部署下这里始终走原生 fetch。
++    if (bridgeUnavailable || !isDesktopApp() || !shouldBridge(resolveRequestUrl(input))) {
++      return originalFetch(input, init)
++    }
++
++    let bridgedFetch: BridgedFetch
++    try {
++      bridgedFetch = await loadBridgedFetch()
++    } catch (err) {
++      // 插件整体不可用（例如权限未配置）时降级回 WebView 请求，保留上游的跨域错误提示
++      bridgeUnavailable = true
++      console.error('桌面端请求通道不可用，已降级为 WebView 原生请求', err)
++      return originalFetch(input, init)
++    }
++
++    // 通道正常时不再兜底：真实的网络/HTTP 错误应当原样抛出
++    return bridgedFetch(input, init)
++  }
++}
++
++/** 点击外部链接时交给系统浏览器，避免 WebView 被导航离开应用 */
++function installExternalLinkHandler() {
++  document.addEventListener(
++    'click',
++    (event) => {
++      // 同样在事件触发时判断，浏览器环境下直接放行
++      if (!isDesktopApp()) return
++      if (event.defaultPrevented || event.button !== 0) return
++      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
++
++      const target = event.target as Element | null
++      const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null
++      if (!anchor) return
++
++      const href = anchor.href
++      if (!/^https?:\/\//i.test(href) || isAppOwnUrl(href)) return
++
++      event.preventDefault()
++      void openExternalUrl(href)
++    },
++    true,
++  )
++}
++
++async function openExternalUrl(url: string) {
++  try {
++    const { openUrl } = await import('@tauri-apps/plugin-opener')
++    await openUrl(url)
++  } catch (err) {
++    console.error('打开外部链接失败', url, err)
++  }
++}
++
++/** 挂载应用前调用，安装全部桌面端适配 */
++export function installDesktopIntegration() {
++  if (installed) return
++  installed = true
++  // 两者都无条件安装，内部按运行环境自行判断，保证浏览器部署行为不变
++  installFetchBridge()
++  installExternalLinkHandler()
++}
++
++/** 浏览器端的下载兜底，保持与上游一致的行为 */
++export function triggerBrowserDownload(blob: Blob, fileName: string) {
++  const url = URL.createObjectURL(blob)
++  const a = document.createElement('a')
++  a.href = url
++  a.download = fileName
++  document.body.appendChild(a)
++  a.click()
++  a.remove()
++  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
++}
++
++async function writeBlob(path: string, blob: Blob) {
++  const { writeFile } = await import('@tauri-apps/plugin-fs')
++  await writeFile(path, new Uint8Array(await blob.arrayBuffer()))
++}
++
++function splitFileName(fileName: string) {
++  const dot = fileName.lastIndexOf('.')
++  if (dot <= 0) return { base: fileName, extension: '' }
++  return { base: fileName.slice(0, dot), extension: fileName.slice(dot) }
++}
++
++/** 单个文件走「另存为」，由系统对话框负责重名确认 */
++async function resolveSingleTarget(file: DesktopFileItem) {
++  const { save } = await import('@tauri-apps/plugin-dialog')
++  const extension = splitFileName(file.fileName).extension.replace('.', '')
++  const path = await save({
++    defaultPath: file.fileName,
++    filters: extension ? [{ name: extension.toUpperCase(), extensions: [extension] }] : undefined,
++  })
++  return path ? [{ path, blob: file.blob }] : null
++}
++
++/** 多个文件只弹一次目录选择，并在目录内自动避让重名 */
++async function resolveDirectoryTargets(files: DesktopFileItem[]) {
++  const { open } = await import('@tauri-apps/plugin-dialog')
++  const { exists } = await import('@tauri-apps/plugin-fs')
++  const { join } = await import('@tauri-apps/api/path')
++
++  const directory = await open({
++    directory: true,
++    recursive: true,
++    title: `选择保存 ${files.length} 个文件的文件夹`,
++  })
++  if (typeof directory !== 'string') return null
++
++  // 重名时追加序号，避免覆盖已有文件；检查失败时放弃避让，但不能让整批保存失败
++  const isTaken = async (name: string) => {
++    try {
++      return await exists(await join(directory, name))
++    } catch (err) {
++      console.warn('检查目标文件是否存在失败，将直接写入', err)
++      return false
++    }
++  }
++
++  const targets: Array<{ path: string; blob: Blob }> = []
++  for (const file of files) {
++    const { base, extension } = splitFileName(file.fileName)
++    let name = file.fileName
++    let index = 2
++    while (await isTaken(name)) {
++      name = `${base}-${index}${extension}`
++      index++
++    }
++    targets.push({ path: await join(directory, name), blob: file.blob })
++  }
++  return targets
++}
++
++/**
++ * 保存一批文件。
++ * 桌面端弹出原生对话框，返回实际写入成功/失败的数量；
++ * 用户取消时返回 0/0，方便调用方区分「取消」与「失败」。
++ */
++export async function saveFiles(files: DesktopFileItem[]): Promise<DesktopSaveResult> {
++  if (files.length === 0) return { successCount: 0, failCount: 0 }
++
++  if (!isDesktopApp()) {
++    // 与上游一致：多文件连续下载之间留出间隔，否则浏览器可能只放行第一张
++    for (let index = 0; index < files.length; index++) {
++      triggerBrowserDownload(files[index].blob, files[index].fileName)
++      if (files.length > 1) await delay(100)
++    }
++    return { successCount: files.length, failCount: 0 }
++  }
++
++  const targets =
++    files.length === 1 ? await resolveSingleTarget(files[0]) : await resolveDirectoryTargets(files)
++  if (!targets) return { successCount: 0, failCount: 0 }
++
++  let successCount = 0
++  let failCount = 0
++  for (const target of targets) {
++    try {
++      await writeBlob(target.path, target.blob)
++      successCount++
++    } catch (err) {
++      console.error('保存文件失败', target.path, err)
++      failCount++
++    }
++  }
++  return { successCount, failCount }
++}
++
++/** 保存单个文件，常用于导出备份 */
++export async function saveBlob(blob: Blob, fileName: string): Promise<DesktopSaveResult> {
++  return saveFiles([{ blob, fileName }])
++}
++
++function delay(ms: number) {
++  return new Promise((resolve) => window.setTimeout(resolve, ms))
++}
+diff --git a/src/lib/downloadImages.ts b/src/lib/downloadImages.ts
+index 3850271..766012f 100644
+--- a/src/lib/downloadImages.ts
++++ b/src/lib/downloadImages.ts
+@@ -1,5 +1,6 @@
+ import { zipSync } from 'fflate'
+ import type { TaskRecord } from '../types'
++import { saveBlob, saveFiles, type DesktopFileItem } from './desktop'
+ import { getNumberedFileNameBase, sanitizeFileNamePart } from './exportFileName'
+ import { ensureImageCached } from './imageCache'
+ 
+@@ -27,7 +28,7 @@ export { formatExportFileTime } from './exportFileName'
+ export async function downloadImageIds(imageIds: string[], fileNameBase = 'images'): Promise<DownloadImagesResult> {
+   if (imageIds.length === 0) return { successCount: 0, failCount: 0 }
+ 
+-  let successCount = 0
++  const files: DesktopFileItem[] = []
+   let failCount = 0
+   const multiple = imageIds.length > 1
+ 
+@@ -38,16 +39,16 @@ export async function downloadImageIds(imageIds: string[], fileNameBase = 'image
+       const fileName = multiple
+         ? `${fileNameBase}-${order}.${getBlobExtension(blob)}`
+         : `${fileNameBase}.${getBlobExtension(blob)}`
+-      triggerDownload(blob, fileName)
+-      successCount++
+-      if (multiple) await delay(100)
++      files.push({ blob, fileName })
+     } catch (err) {
+       console.error(err)
+       failCount++
+     }
+   }
+ 
+-  return { successCount, failCount }
++  // 桌面端一次性选择保存位置，浏览器端沿用逐张触发下载
++  const saved = await saveFiles(files)
++  return { successCount: saved.successCount, failCount: failCount + saved.failCount }
+ }
+ 
+ export async function downloadImageEntriesAsZip(entries: DownloadImageZipEntry[], zipFileNameBase = 'images'): Promise<DownloadImagesResult> {
+@@ -83,7 +84,7 @@ export async function downloadImageEntriesAsZip(entries: DownloadImageZipEntry[]
+   if (successCount > 0) {
+     const zipped = zipSync(zipFiles, { level: 6 })
+     const buffer = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer
+-    triggerDownload(new Blob([buffer], { type: 'application/zip' }), `${sanitizeFileNamePart(zipFileNameBase) || 'images'}.zip`)
++    await saveBlob(new Blob([buffer], { type: 'application/zip' }), `${sanitizeFileNamePart(zipFileNameBase) || 'images'}.zip`)
+   }
+ 
+   return { successCount, failCount }
+@@ -113,22 +114,7 @@ async function getImageBlob(imageIdOrUrl: string): Promise<Blob> {
+   return await res.blob()
+ }
+ 
+-function triggerDownload(blob: Blob, fileName: string) {
+-  const url = URL.createObjectURL(blob)
+-  const a = document.createElement('a')
+-  a.href = url
+-  a.download = fileName
+-  document.body.appendChild(a)
+-  a.click()
+-  document.body.removeChild(a)
+-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+-}
+-
+ function getBlobExtension(blob: Blob): string {
+   return MIME_EXTENSIONS[blob.type.toLowerCase()] ?? blob.type.split('/')[1] ?? 'png'
+ }
+ 
+-function delay(ms: number) {
+-  return new Promise((resolve) => window.setTimeout(resolve, ms))
+-}
+-
+diff --git a/src/main.tsx b/src/main.tsx
+index 43e065c..6905d29 100644
+--- a/src/main.tsx
++++ b/src/main.tsx
+@@ -5,13 +5,17 @@ import App from './App'
+ import 'streamdown/styles.css'
+ import 'katex/dist/katex.min.css'
+ import './index.css'
++import { installDesktopIntegration, isDesktopApp } from './lib/desktop'
+ import { installMobileViewportGuards } from './lib/viewport'
+ 
+ installMobileViewportGuards()
+-
++installDesktopIntegration()
++// 桌面端资源随应用一起打包，Service Worker 只会在升级后继续提供旧缓存。
++// 注册发生在 load 阶段，因此把环境判断也放到那时。
+ if ('serviceWorker' in navigator) {
+   if (import.meta.env.PROD) {
+     window.addEventListener('load', () => {
++      if (isDesktopApp()) return
+       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error) => {
+         console.error('Service worker registration failed:', error)
+       })
+diff --git a/src/store.ts b/src/store.ts
+index 0fd2e73..c6aded9 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -60,6 +60,7 @@ import { blobToDataUrl, fileToDataUrl } from './lib/dataUrl'
+ import { cacheImage, cacheThumbnail, clearImageCaches, deleteCachedImage, deleteImageCacheEntry, ensureImageCached, scheduleThumbnailBackfill } from './lib/imageCache'
+ import { hasActiveDataOperations } from './lib/dataOperations'
+ import { formatExportFileTime } from './lib/exportFileName'
++import { isDesktopApp, saveBlob } from './lib/desktop'
+ import { buildExportZip, createExportBlob, getExportImageEstimatedBytes, getExportZipPlan, MAX_EXPORT_ZIP_BYTES, readExportZip, readExportZipFileAsDataUrl, readExportZipManifest } from './lib/exportZip'
+ import { deleteAgentRoundFromConversation, getActiveAgentRounds, getAgentRoundPath, normalizeAgentConversations, remapAgentRoundMentionsForPathChange, uniqueIds } from './lib/agentConversationState'
+ import { canonicalizeBatchFunctionCallArguments, countResponseToolCalls, createReadyAgentRecoveredToolState, getAgentFunctionOutputCallIds, getAgentRecoveredFailureError, getAgentRecoveredToolCallCount, getPersistableAgentConversations, getPersistableRawResponsePayload, mergeResponseOutputItems, scrubResponseOutputForDeletedAgentTasks, scrubTaskRawResponsePayloadForDeletedTasks } from './lib/agentResponseState'
+@@ -4352,18 +4353,12 @@ export async function exportData(options: ExportOptions = { exportConfig: true,
+         backupPart: plan.length > 1 ? { id: backupId, index: partNumber, total: plan.length } : undefined,
+       })
+       const blob = createExportBlob(result.bytes)
+-      const url = URL.createObjectURL(blob)
+-      const a = document.createElement('a')
+       const suffix = plan.length > 1 ? `_${String(plan.length).padStart(2, '0')}parts_part${String(partNumber).padStart(2, '0')}` : ''
+-      a.href = url
+-      a.download = `gpt-image-playground-backup_${formatExportFileTime(new Date(exportedAt))}${suffix}.zip`
+-      document.body.appendChild(a)
+-      a.click()
+-      a.remove()
+-      setTimeout(() => URL.revokeObjectURL(url), 1000)
++      await saveBlob(blob, `gpt-image-playground-backup_${formatExportFileTime(new Date(exportedAt))}${suffix}.zip`)
+       if (partNumber < plan.length) await new Promise((resolve) => setTimeout(resolve, 150))
+     }
+-    useStore.getState().showToast(plan.length > 1 ? `已请求下载 ${plan.length} 个 ZIP，请确认浏览器已允许多文件下载` : '数据已导出', 'success')
++    const multiPartHint = isDesktopApp() ? `，已保存 ${plan.length} 个 ZIP` : '，请确认浏览器已允许多文件下载'
++    useStore.getState().showToast(plan.length > 1 ? `数据已导出${multiPartHint}` : '数据已导出', 'success')
+   } catch (e) {
+     console.error('exportData failed', e)
+     const detail = e instanceof Error ? e.message.trim() : String(e).trim()
