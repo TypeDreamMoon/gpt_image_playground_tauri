@@ -46,7 +46,9 @@ export function ensureWebReady() {
   }
 
   console.log('正在应用桌面端适配补丁 …')
-  const apply = git(['apply', PATCH], WEB_DIR, 'inherit')
+  // --whitespace=nowarn：补丁正文是 LF，而 Windows 上 core.autocrlf 会把检出内容
+  // 转成 CRLF，git 会把这种转换当成空白错误刷屏。已确认落盘结果与行尾约定一致。
+  const apply = git(['apply', '--whitespace=nowarn', PATCH], WEB_DIR, 'inherit')
   if (apply.status !== 0) throw new Error('应用桌面端补丁失败。')
 }
 
