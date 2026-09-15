@@ -1,0 +1,100 @@
+name: Release
+
+# 打 tag（形如 v0.7.12）即自动构建并发布 Release。
+# 版本号以 tag 为准，会在构建前写入 package.json / tauri.conf.json / Cargo.toml。
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 创建 Release 需要写权限
+permissions:
+  contents: write
+
+# 同一 tag 重复触发时取消旧任务，避免两个流程同时往一个 Release 上传
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码（含上游子模块）
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 构建产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 安装桌面端依赖
+        run: npm ci
+
+      - name: 按 tag 同步版本号
+        run: node scripts/sync-version.mjs "${{ github.ref_name }}"
+
+      - name: 应用上游补丁
+        run: npm run setup
+
+      - name: 安装上游前端依赖
+        run: npm run web:install
+
+      - name: 构建并发布 Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: npm run tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: 'GPT Image Playground ${{ github.ref_name }}'
+          releaseDraft: false
+          prerelease: false
+          releaseBody: |
+            GPT Image Playground 的 Tauri 桌面版，基于上游 [CookSleep/gpt_image_playground](https://github.com/CookSleep/gpt_image_playground) 封装。
+
+            ### 下载
+
+            | 文件 | 说明 |
+            | --- | --- |
+            | `*_x64-setup.exe` | 安装版，带开始菜单与卸载项 |
+            | `*_x64_portable.exe` | 免安装版，双击即用 |
+
+            系统要求：Windows 10/11 64 位。WebView2 运行时系统一般已自带，若缺失请从 [微软官网](https://developer.microsoft.com/microsoft-edge/webview2/) 安装。
+
+            ### 与网页版的区别
+
+            - 请求由 Rust 侧发出，不再受各家 API 的跨域（CORS）限制
+            - 图片与备份改用原生保存对话框，多文件只弹一次目录选择
+            - 外部链接交由系统默认浏览器打开
+            - 前端资源随应用打包，不注册 Service Worker
+
+            详细说明见 [README](https://github.com/${{ github.repository }}#readme)。
+
+      - name: 附加免安装版可执行文件
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $exe = "src-tauri/target/release/gpt-image-playground.exe"
+          if (-not (Test-Path $exe)) { throw "未找到构建产物 $exe" }
+          $name = "GPT-Image-Playground_${{ github.ref_name }}_x64_portable.exe"
+          gh release upload "${{ github.ref_name }}" "$exe#$name" --clobber
+
+      - name: 汇总产物清单
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name'

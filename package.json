@@ -10,6 +10,8 @@
     "web:install": "node scripts/tauri-hook.mjs install",
     "web:dev": "node scripts/tauri-hook.mjs dev",
     "web:build": "node scripts/tauri-hook.mjs build",
+    "web:test": "node scripts/tauri-hook.mjs test",
+    "version:sync": "node scripts/sync-version.mjs",
     "dev": "node scripts/tauri.mjs dev",
     "build": "node scripts/tauri.mjs build",
     "build:debug": "node scripts/tauri.mjs build --debug",

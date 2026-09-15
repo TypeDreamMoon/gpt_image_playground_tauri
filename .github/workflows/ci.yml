@@ -1,0 +1,62 @@
+name: CI
+
+# 提交与 PR 上做构建校验；发版由 release.yml 负责。
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 只做构建校验，不需要写权限
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码（含上游子模块）
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 构建产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 安装桌面端依赖
+        run: npm ci
+
+      # 上游子模块更新后补丁可能失效，这一步会明确报错
+      - name: 应用上游补丁
+        run: npm run setup
+
+      - name: 安装上游前端依赖
+        run: npm run web:install
+
+      - name: 运行上游单元测试
+        run: npm run web:test
+
+      - name: 构建前端（tsc + vite）
+        run: npm run web:build
+
+      - name: 检查 Rust 外壳可编译
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked

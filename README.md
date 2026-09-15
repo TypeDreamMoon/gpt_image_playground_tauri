@@ -1,5 +1,8 @@
 # GPT Image Playground Desktop
 
+[![CI](https://github.com/TypeDreamMoon/gpt_image_playground_tauri/actions/workflows/ci.yml/badge.svg)](https://github.com/TypeDreamMoon/gpt_image_playground_tauri/actions/workflows/ci.yml)
+[![Release](https://github.com/TypeDreamMoon/gpt_image_playground_tauri/actions/workflows/release.yml/badge.svg)](https://github.com/TypeDreamMoon/gpt_image_playground_tauri/actions/workflows/release.yml)
+
 用 [Tauri v2](https://github.com/tauri-apps/tauri) 给 [CookSleep/gpt_image_playground](https://github.com/CookSleep/gpt_image_playground) 套一层桌面外壳。
 
 业务代码完全沿用上游的纯前端实现（`_source/`），本仓库只负责提供桌面运行时，并补齐 WebView 相比浏览器缺失的几项能力。因此上游的所有功能——多供应商 API 配置、图库、Agent 工作区、蒙版编辑、数据导入导出——都原样保留。
@@ -135,6 +138,30 @@ npm run patch:update
 - **Rust 工具链**：若系统已安装 Rust 则直接使用；否则回退到 `.toolchain/` 下的工作区私有工具链。执行 `node scripts/setup-rust.mjs` 可安装/修复，`npm run build`、`npm run dev` 会自动识别。
 - `.toolchain/`、`.npm-cache/`、`.tmp/` 均为本地缓存目录，已加入 `.gitignore`。
 
+## 发布新版本
+
+打 tag 即自动构建并发布 Release：
+
+```powershell
+git tag v0.7.12
+git push origin v0.7.12
+```
+
+`.github/workflows/release.yml` 会依次完成：
+
+1. 从 tag 解析版本号，写入 `package.json`、`package-lock.json`、`tauri.conf.json`、`Cargo.toml`、`Cargo.lock`，确保 tag 与安装包版本不会各说各话；
+2. 拉取子模块、应用桌面端补丁、安装依赖；
+3. 用 `tauri-action` 构建并创建 Release；
+4. 额外附上免安装版 `*_portable.exe`。
+
+产物有两份：`*_x64-setup.exe`（安装版）与 `*_x64_portable.exe`（免安装）。
+
+版本号建议跟随上游（上游 `0.7.12` 就发 `v0.7.12`），这样应用内显示的版本、安装包版本、tag 三者一致。需要在不更新上游的情况下单独发包装层修复时，可用 `v0.7.12-1` 这类 tag。
+
+`main` 上的提交与 PR 会触发 `.github/workflows/ci.yml`：应用补丁 → 跑上游单元测试 → 构建前端 → `cargo check`。上游子模块更新导致补丁失效时，这一步会直接失败。
+
+> 目前只构建 Windows x64。要扩展到 macOS / Linux，在 `release.yml` 的 `release` 任务上加 `strategy.matrix` 即可；Linux 需额外安装 `libwebkit2gtk-4.1-dev` 等系统依赖。
+
 ## 常用脚本
 
 | 命令 | 作用 |
@@ -145,6 +172,8 @@ npm run patch:update
 | `npm run build` | 生产构建并打包 NSIS 安装程序 |
 | `npm run build:debug` | 调试构建，保留 devtools |
 | `npm run web:build` | 只构建前端（输出到 `_source/dist`） |
+| `npm run web:test` | 运行上游单元测试 |
+| `npm run version:sync -- v0.7.12` | 手动同步版本号到各版本字段 |
 | `npm run tauri -- <args>` | 透传任意 Tauri CLI 参数 |
 | `npm run icon` | 由 `src-tauri/icons/source.svg` 重新生成全套图标 |
 | `npm run web:install` | 安装上游前端依赖 |
