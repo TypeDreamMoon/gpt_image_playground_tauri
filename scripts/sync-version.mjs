@@ -33,13 +33,29 @@ function report(file, before) {
   console.log(`${file}: ${before} -> ${version}`)
 }
 
-/** package.json 与 tauri.conf.json 都是纯 JSON，解析改写即可（保持 2 空格缩进） */
-function syncJson(file, key) {
+/**
+ * package.json / package-lock.json 由 npm 生成，格式与 JSON.stringify(.., null, 2) 一致，
+ * 直接解析改写不会产生无关 diff。
+ */
+function syncJsonViaParse(file, key) {
   const data = JSON.parse(read(file))
   const before = data[key]
   data[key] = version
   write(file, `${JSON.stringify(data, null, 2)}\n`)
   report(file, before)
+}
+
+/**
+ * tauri.conf.json 是手写的，含 ["nsis"] 这类内联数组；整体重排会带出大量无关 diff，
+ * 因此只替换目标字段本身。按行锚定，CRLF 下同样有效。
+ */
+function syncJsonField(file, key) {
+  const text = read(file)
+  const pattern = new RegExp(`^(\\s*"${key}":\\s*)"([^"]*)"`, 'm')
+  const match = text.match(pattern)
+  if (!match) throw new Error(`${file} 中未找到 "${key}" 字段`)
+  write(file, text.replace(pattern, `$1"${version}"`))
+  report(file, match[2])
 }
 
 /** package-lock.json 有两处版本，需与 package.json 保持一致，否则 npm ci 会报锁文件不同步 */
@@ -82,9 +98,9 @@ function syncCargoLock() {
   report(file, matched[1])
 }
 
-syncJson('package.json', 'version')
+syncJsonViaParse('package.json', 'version')
 syncPackageLock()
-syncJson('src-tauri/tauri.conf.json', 'version')
+syncJsonField('src-tauri/tauri.conf.json', 'version')
 syncCargoToml()
 syncCargoLock()
 
