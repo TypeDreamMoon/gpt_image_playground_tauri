@@ -20,6 +20,9 @@
 ├── patches/
 │   └── desktop.patch       本仓库对上游的全部改动
 ├── scripts/                构建、补丁与工具链脚本
+├── .github/workflows/
+│   ├── release.yml         打 tag 自动构建并发布 Release
+│   └── ci.yml              提交与 PR 的构建校验
 └── package.json            桌面端依赖与命令入口
 ```
 
