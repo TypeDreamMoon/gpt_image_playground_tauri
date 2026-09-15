@@ -29,7 +29,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "category": "Graphics and Design",
     "shortDescription": "GPT Image Playground 桌面版",
     "longDescription": "基于 OpenAI gpt-image 系列 API 的图片生成与编辑工具，使用 Tauri 打包为桌面应用。",
@@ -43,7 +45,10 @@
     ],
     "windows": {
       "nsis": {
-        "languages": ["SimpChinese", "English"],
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
         "installMode": "currentUser"
       }
     }

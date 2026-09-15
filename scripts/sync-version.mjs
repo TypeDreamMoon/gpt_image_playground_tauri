@@ -67,11 +67,19 @@ function syncCargoToml() {
 function syncCargoLock() {
   const file = 'src-tauri/Cargo.lock'
   const text = read(file)
-  const pattern = new RegExp(`(name = "${CARGO_PACKAGE}"\\nversion = )"([^"]*)"`)
-  const match = text.match(pattern)
-  if (!match) throw new Error(`${file} 中未找到 ${CARGO_PACKAGE} 的版本`)
-  write(file, text.replace(pattern, `$1"${version}"`))
-  report(file, match[2])
+  // 逐行处理而不是用跨行正则：Windows 上 core.autocrlf 会把文件检出成 CRLF，
+  // "name = ...\nversion = ..." 这种跨行匹配在 CRLF 下会失配。
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+
+  const nameIndex = lines.findIndex((line) => line === `name = "${CARGO_PACKAGE}"`)
+  const versionLine = nameIndex >= 0 ? lines[nameIndex + 1] : undefined
+  const matched = versionLine?.match(/^version = "([^"]*)"$/)
+  if (!matched) throw new Error(`${file} 中未找到 ${CARGO_PACKAGE} 的版本`)
+
+  lines[nameIndex + 1] = `version = "${version}"`
+  write(file, lines.join(eol))
+  report(file, matched[1])
 }
 
 syncJson('package.json', 'version')
