@@ -90,8 +90,11 @@ jobs:
         run: |
           $exe = "src-tauri/target/release/gpt-image-playground.exe"
           if (-not (Test-Path $exe)) { throw "未找到构建产物 $exe" }
-          $name = "GPT-Image-Playground_${{ github.ref_name }}_x64_portable.exe"
-          gh release upload "${{ github.ref_name }}" "$exe#$name" --clobber
+          # 先复制成带版本号的名字再上传：gh release upload 的 file#label 只设置展示标签，
+          # 附件名仍取文件名本身，直接上传会得到不带版本的 gpt-image-playground.exe。
+          $named = Join-Path (Split-Path $exe) "GPT-Image-Playground_${{ github.ref_name }}_x64_portable.exe"
+          Copy-Item $exe $named -Force
+          gh release upload "${{ github.ref_name }}" $named --clobber
 
       - name: 汇总产物清单
         shell: pwsh
