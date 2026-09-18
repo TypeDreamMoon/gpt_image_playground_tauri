@@ -157,7 +157,14 @@ git push origin v0.7.12
 3. 用 `tauri-action` 构建并创建 Release；
 4. 额外附上免安装版 `*_portable.exe`。
 
-产物有两份：`*_x64-setup.exe`（安装版）与 `*_x64_portable.exe`（免安装）。
+产物有两份：
+
+| 附件 | 说明 |
+| --- | --- |
+| `GPT.Image.Playground_<版本>_x64-setup.exe` | 安装版，带开始菜单与卸载项 |
+| `GPT-Image-Playground_<版本>_x64_portable.exe` | 免安装版，双击即用，文件名已带版本号 |
+
+> 安装版的文件名来自 Tauri 的 `productName`（含空格），GitHub 会把空格替换成点，因此两份附件的分隔符不一致，属正常现象。
 
 版本号建议跟随上游（上游 `0.7.12` 就发 `v0.7.12`），这样应用内显示的版本、安装包版本、tag 三者一致。需要在不更新上游的情况下单独发包装层修复时，可用 `v0.7.12-1` 这类 tag。
 
